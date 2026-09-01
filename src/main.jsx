@@ -65,6 +65,7 @@ const candidateStocks = [
 
 const STORAGE_KEY = 'nexus-sim-account-v2'
 const SOURCE_KEY = 'nexus-market-source-v1'
+const WATCHLIST_KEY = 'nexus-watchlist-v1'
 const INITIAL_CASH = 404204.65
 const marketSources = [
   { id: 'futu', label: '富途 OpenD', detail: '本机 127.0.0.1:11111 · 实时行情与 K 线' },
@@ -180,7 +181,7 @@ function MarketMapView() {
   return <section className="view-panel"><div className="view-toolbar"><div><p className="eyebrow">LIVE MARKET MAP</p><h2>市场地图</h2><span className="view-note">按你的 5 个持仓筛选，数据来自富途 OpenD。</span></div><div className="segmented-control">{['持仓相关', '全部自选', '涨跌幅'].map((item) => <button className={scope === item ? 'selected' : ''} key={item} onClick={() => setScope(item)}>{item}</button>)}</div></div><div className="market-table"><div className="market-table-head"><span>标的</span><span>最新价</span><span>涨跌幅</span><span>成交量</span><span>状态</span><span>操作</span></div>{rows.map((row) => <div className="market-table-row" key={row[0]}><div><strong>{row[0]}</strong><small>{row[1]}</small></div><strong>{row[2]}</strong><span className={row[3].startsWith('+') ? 'positive' : 'negative'}>{row[3]}</span><span className="mono-muted">{row[4]}</span><span className={`market-state ${row[5] === '承压' ? 'danger' : row[5] === '高波动' ? 'warn' : ''}`}>{row[5]}</span><button className="small-action" onClick={() => window.alert(`已将 ${row[1]} 设为主图标的`)}>查看图表</button></div>)}</div></section>
 }
 
-function PositionEditor({ initial, onSave, onClose }) {
+function PositionEditor({ initial, onSave, onDelete, onClose }) {
   const [form, setForm] = useState(initial || { symbol: 'HK.00700', name: '腾讯控股', qty: 1000, avg: 447.8, risk: '中', side: '多' })
   const update = (key) => (event) => setForm((prev) => ({ ...prev, [key]: key === 'qty' || key === 'avg' ? Number(event.target.value) : event.target.value }))
   return <div className="plan-modal-backdrop" onClick={onClose}><div className="plan-modal editor-modal" onClick={(event) => event.stopPropagation()}><div className="plan-modal-head"><div><span className="eyebrow">PORTFOLIO CONFIG</span><h3>配置模拟持仓</h3></div><button className="icon-button" onClick={onClose} aria-label="关闭配置"><X size={17} /></button></div><div className="editor-grid"><label>代码<input value={form.symbol} onChange={update('symbol')} placeholder="HK.00700" /></label><label>名称<input value={form.name} onChange={update('name')} placeholder="腾讯控股" /></label><label>数量<input type="number" min="0" step="100" value={form.qty} onChange={update('qty')} /></label><label>持仓成本<input type="number" min="0" step="0.01" value={form.avg} onChange={update('avg')} /></label><label>方向<select value={form.side} onChange={update('side')}><option>多</option><option>空</option></select></label><label>风险<select value={form.risk} onChange={update('risk')}><option>低</option><option>中</option><option>高</option></select></label></div><p className="plan-disclaimer">保存后会加入本地模拟账户；行情现价仍由富途 OpenD 提供，真实交易不会被触发。</p><div className="plan-modal-actions"><button className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" onClick={() => { if (form.symbol && form.name && form.qty > 0 && form.avg >= 0) { onSave(form); onClose() } }}><Check size={15} />保存持仓</button></div></div></div>
@@ -244,6 +245,29 @@ function RecommendationsPanel({ positions, liveQuotes, onOpenTrade }) {
   return <section className="panel recommendation-panel"><div className="panel-header"><div><div className="panel-kicker"><Sparkles size={14} />AI 荐股与点位</div><h2>量化计划草案 <span className="live-chip">按实时价计算</span></h2></div><span className="muted">每次刷新重新计算</span></div><div className="recommendation-note"><BrainCircuit size={15} /><span>目标价不会固定写死：以富途最新价为基准，结合 ATR 风险带动态计算。点击建议会自动填入交易票据，批准前不会改变模拟账户。</span></div><div className="recommendation-table"><div className="recommendation-head"><span>标的</span><span>策略动作</span><span>触发区间</span><span>止损</span><span>目标</span><span>评分</span><span>执行</span></div>{combined.map((item) => <div className="recommendation-row" key={item.symbol}><div><strong>{item.symbol}</strong><small>{item.name} · {formatNumber(item.price)}</small></div><div><strong className={item.action.startsWith('减') ? 'negative' : 'positive'}>{item.action}</strong><small>{item.method}</small></div><span>{item.entry}</span><span className="negative">{item.stop}</span><span className="positive">{item.target}</span><b className={item.score === 'C+' ? 'warning-text' : 'positive'}>{item.score}</b><button className="small-action" onClick={() => onOpenTrade(item, item.action.startsWith('减') ? 'sell' : 'buy')}><ShoppingCart size={12} />填入交易票据</button></div>)}</div></section>
 }
 
+function MarketStatusPanel({ watchlist, liveQuotes, onSelect, onAdd, onRemove }) {
+  const [input, setInput] = useState('')
+  const submit = (event) => {
+    event.preventDefault()
+    const raw = input.trim().toUpperCase()
+    if (!raw) return
+    const symbol = raw.includes('.') ? raw : `HK.${raw.replace(/^HK/, '')}`
+    onAdd(symbol)
+    setInput('')
+  }
+  const quality = candidateStocks.map((item) => ({ ...item, quote: liveQuotes[item.symbol] })).sort((a, b) => Number(b.quote?.change ?? 0) - Number(a.quote?.change ?? 0))
+  return <section className="panel market-status-panel">
+    <div className="panel-header"><div><div className="panel-kicker"><BarChart3 size={14} />市场现状</div><h2>自选行情与量化荐股</h2></div><span className="muted">实时行情 · 点击标的切换主图</span></div>
+    <form className="market-search" onSubmit={submit}><Search size={15} /><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入股票代码，例如 00700 或 HK.00700" aria-label="输入股票代码" /><button className="small-action" type="submit"><Plus size={12} />加入自选</button></form>
+    <div className="watchlist-grid">{watchlist.map((symbol) => { const quote = liveQuotes[symbol]; const name = quote?.name || candidateStocks.find((item) => item.symbol === symbol)?.name || symbol; return <button className={`watch-card ${symbol === watchlist[0] ? 'selected' : ''}`} key={symbol} onClick={() => onSelect(symbol)}><span><strong>{name}</strong><small>{symbol}</small></span><b>{quote?.price ? formatNumber(quote.price, quote.price < 10 ? 3 : 2) : '--'}</b><em className={quote?.change >= 0 ? 'positive' : 'negative'}>{quote ? `${quote.change >= 0 ? '+' : ''}${quote.change.toFixed(2)}%` : '等待行情'}</em><i onClick={(event) => { event.stopPropagation(); onRemove(symbol) }} aria-label={`移除 ${symbol}`}>×</i></button> })}</div>
+    <div className="market-research"><div className="market-research-head"><span>量化优选</span><small>趋势、动量与风险预算综合评分</small></div>{quality.map((item) => { const quote = item.quote; const price = Number(quote?.price ?? item.price); return <div className="quality-row" key={item.symbol} onClick={() => onSelect(item.symbol)}><div><strong>{item.name}</strong><small>{item.symbol} · {item.method}</small></div><b>{formatNumber(price, price < 10 ? 3 : 2)}</b><span className={quote?.change >= 0 ? 'positive' : 'negative'}>{quote ? `${quote.change >= 0 ? '+' : ''}${quote.change.toFixed(2)}%` : '--'}</span><span className="quality-score">{item.score}</span><button className="small-action" onClick={(event) => { event.stopPropagation(); onAdd(item.symbol) }}><Plus size={12} />自选</button></div> })}</div>
+  </section>
+}
+
+function HoldingsStrategyPanel({ positions, liveQuotes, onEdit, onDelete, onTrade }) {
+  return <section className="panel holdings-strategy-panel"><div className="panel-header"><div><div className="panel-kicker"><WalletCards size={14} />当前模拟持仓</div><h2>持仓明细与逐标的策略</h2></div><span className="muted">可编辑 · 可删除 · 模拟账户</span></div>{positions.length ? <div className="holding-strategy-list">{positions.map((position) => { const live = hydratePosition(position, liveQuotes); const plan = buildRecommendation(position, liveQuotes); return <article className="holding-strategy-row" key={position.symbol}><div className="holding-identity"><div><strong>{position.name}</strong><small>{position.symbol} · {position.side}仓 · {formatNumber(position.qty, 0)} 股</small></div><b className={live.tone}>{live.pnl >= 0 ? '+' : ''}{formatNumber(live.pnl)}<small>{live.pnlPct >= 0 ? '+' : ''}{live.pnlPct.toFixed(2)}%</small></b></div><div className="holding-metrics"><span>现价 <b>{formatNumber(live.last, live.last < 10 ? 3 : 2)}</b></span><span>成本 <b>{formatNumber(position.avg)}</b></span><span>风险 <b className={position.risk === '高' ? 'negative' : position.risk === '中' ? 'warning-text' : 'positive'}>{position.risk}</b></span></div><div className="holding-plan"><div><span>策略建议</span><strong className={plan.action.startsWith('减') ? 'negative' : 'positive'}>{plan.action}</strong></div><div><span>建议区间</span><b>{plan.entry}</b></div><div><span>止损 / 目标</span><b><i className="negative">{plan.stop}</i> / <i className="positive">{plan.target}</i></b></div><div className="holding-actions"><button className="small-action" onClick={() => onTrade(position, plan.action.startsWith('减') ? 'sell' : 'buy')}><ShoppingCart size={12} />填入交易</button><button className="icon-button" onClick={() => onEdit(position)} aria-label={`编辑 ${position.symbol}`} title="编辑持仓"><Pencil size={14} /></button><button className="icon-button danger-icon" onClick={() => onDelete(position.symbol)} aria-label={`删除 ${position.symbol}`} title="删除持仓"><Trash2 size={14} /></button></div></div></article> })}</div> : <div className="empty-state holdings-empty"><WalletCards size={25} /><strong>暂无模拟持仓</strong><span>点击右上角“配置持仓”添加你的真实持仓。</span></div>}</section>
+}
+
 function App() {
   const [activeNav, setActiveNav] = useState('总览')
   const [range, setRange] = useState('1D')
@@ -252,10 +276,14 @@ function App() {
   const [mobileNav, setMobileNav] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [watchSymbol, setWatchSymbol] = useState('HK.00981')
+  const [watchlist, setWatchlist] = useState(() => {
+    try { return JSON.parse(window.localStorage.getItem(WATCHLIST_KEY)) || ['HK.00981', 'HK.00700', 'HK.03690'] } catch { return ['HK.00981', 'HK.00700', 'HK.03690'] }
+  })
   const [liveQuotes, setLiveQuotes] = useState({})
   const [liveKline, setLiveKline] = useState([])
   const [liveConnected, setLiveConnected] = useState(false)
   const [showEditor, setShowEditor] = useState(false)
+  const [editorInitial, setEditorInitial] = useState(null)
   const [tradeDraft, setTradeDraft] = useState(null)
   const [executionNotice, setExecutionNotice] = useState(null)
   const [marketSource, setMarketSource] = useState(() => window.localStorage.getItem(SOURCE_KEY) || 'futu')
@@ -268,12 +296,14 @@ function App() {
 
   useEffect(() => { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(account)) }, [account])
   useEffect(() => { window.localStorage.setItem(SOURCE_KEY, marketSource) }, [marketSource])
+  useEffect(() => { window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(watchlist)) }, [watchlist])
 
   useEffect(() => {
     let cancelled = false
     const loadQuotes = async () => {
       try {
-        const payload = await fetch(`http://127.0.0.1:8787/api/quotes?source=${marketSource}`).then((response) => response.json())
+        const symbols = [...new Set([...watchlist, ...accountPositions.map((item) => item.symbol), ...candidateStocks.map((item) => item.symbol)])]
+        const payload = await fetch(`http://127.0.0.1:8787/api/quotes?source=${marketSource}&symbols=${encodeURIComponent(symbols.join(','))}`).then((response) => response.json())
         if (!cancelled && payload.ok) {
           setLiveQuotes(Object.fromEntries(payload.rows.map((row) => [row.symbol, row])))
           setLiveConnected(true)
@@ -290,10 +320,11 @@ function App() {
     const quoteTimer = window.setInterval(loadQuotes, 5000)
     const klineTimer = window.setInterval(loadKline, 10000)
     return () => { cancelled = true; window.clearInterval(quoteTimer); window.clearInterval(klineTimer) }
-  }, [watchSymbol, period, marketSource])
+  }, [watchSymbol, period, marketSource, watchlist, accountPositions])
 
   const currentQuote = liveQuotes[watchSymbol]
-  const activePrice = currentQuote?.price || Number(selectedSignal?.price || 0)
+  const selectedInstrument = currentQuote || selectedSignal || { symbol: watchSymbol, name: watchSymbol, price: 0 }
+  const activePrice = currentQuote?.price || Number(selectedInstrument.price || 0)
   const activePlan = {
     entryValue: activePrice,
     stop: activePrice * 0.96,
@@ -354,6 +385,9 @@ function App() {
     else next.push(position)
     return { ...previous, positions: next }
   })
+  const deletePosition = (symbol) => setAccount((previous) => ({ ...previous, positions: previous.positions.filter((item) => item.symbol !== symbol) }))
+  const addWatch = (symbol) => setWatchlist((previous) => previous.includes(symbol) ? previous : [...previous, symbol].slice(-8))
+  const removeWatch = (symbol) => setWatchlist((previous) => previous.length > 1 ? previous.filter((item) => item !== symbol) : previous)
 
   const refresh = () => {
     setIsRefreshing(true)
@@ -407,11 +441,13 @@ function App() {
           <section className="panel positions-panel"><div className="panel-header"><div><div className="panel-kicker"><WalletCards size={14} />组合状态</div><h2>当前持仓 <span className="count-badge">{accountPositions.length}</span></h2></div><span className="muted">现金 ¥{formatNumber(account.cash)}</span></div><div className="table-scroll"><table><thead><tr><th>标的</th><th>方向</th><th>数量</th><th>成本</th><th>现价</th><th>浮动盈亏</th><th>风险</th></tr></thead><tbody>{accountPositions.map((position) => { const item = hydratePosition(position, liveQuotes); return <tr key={position.symbol}><td><div className="asset-cell"><strong>{position.symbol}</strong><span>{position.name}</span></div></td><td><span className={`side-tag ${position.side === '空' ? 'short' : ''}`}>{position.side}</span></td><td>{formatNumber(position.qty, 0)}</td><td>{formatNumber(position.avg)}</td><td>{formatNumber(item.last, item.last < 10 ? 3 : 2)}</td><td><strong className={item.tone}>{item.pnl >= 0 ? '+' : ''}{formatNumber(item.pnl)}</strong><span className={`pnl-percent ${item.tone}`}>{item.pnlPct >= 0 ? '+' : ''}{item.pnlPct.toFixed(2)}%</span></td><td><span className={`risk-tag ${position.risk === '高' ? 'high' : position.risk === '中' ? 'medium' : 'low'}`}>{position.risk}</span></td></tr> })}</tbody></table></div></section>
 
           <section className="panel lab-panel"><div className="panel-header"><div><div className="panel-kicker"><BrainCircuit size={14} />策略实验室</div><h2>研究进度</h2></div><button className="icon-button" aria-label="打开策略实验室" title="打开策略实验室"><LineChart size={17} /></button></div><div className="strategy-block"><div className="strategy-top"><div><span className="strategy-label champion">CHAMPION</span><strong>HK Momentum v12</strong></div><span className="positive">+18.6% <small>年化</small></span></div><div className="strategy-meta"><span><Gauge size={13} />Sharpe 1.42</span><span><TrendingDown size={13} />回撤 8.2%</span><span><Activity size={13} />影子运行 96d</span></div><div className="mini-progress"><span style={{ width: '100%' }} /></div></div><div className="strategy-block challenger"><div className="strategy-top"><div><span className="strategy-label challenger-label">CHALLENGER</span><strong>US Volatility v04</strong></div><span className="warning-text">评估中</span></div><div className="strategy-meta"><span><Gauge size={13} />Sharpe 0.98</span><span><TrendingDown size={13} />回撤 11.4%</span><span><Activity size={13} />外测 34d</span></div><div className="mini-progress"><span style={{ width: '36%' }} /></div></div><button className="outline-wide-button"><BookOpen size={15} />打开研究日志</button></section>
+          <MarketStatusPanel watchlist={watchlist} liveQuotes={liveQuotes} onSelect={setWatchSymbol} onAdd={addWatch} onRemove={removeWatch} />
+          <HoldingsStrategyPanel positions={accountPositions} liveQuotes={liveQuotes} onEdit={(position) => { setEditorInitial(position); setShowEditor(true) }} onDelete={deletePosition} onTrade={openTradeTicket} />
           <RecommendationsPanel positions={accountPositions} liveQuotes={liveQuotes} onOpenTrade={openTradeTicket} />
         </div> : activeNav === '市场地图' ? <MarketMapView /> : activeNav === '持仓与风险' ? <PositionsView positions={accountPositions} liveQuotes={liveQuotes} onTrade={openTradeTicket} tradeLog={account.trades} onReset={resetAccount} /> : activeNav === '策略实验室' ? <StrategyView /> : <AlertsView signals={signals} setSignals={setSignals} setWatchSymbol={setWatchSymbol} />}
 
         <footer className="app-footer"><span><span className={`status-dot ${liveConnected ? 'live' : ''}`} />{liveConnected ? `${marketSources.find((item) => item.id === marketSource)?.label || '行情源'} 实时连接` : '等待行情源连接'}</span><span>{marketSource === 'futu' ? 'OpenD 10.3.6308 · 127.0.0.1:11111' : '本地行情桥接 · 8787'}</span><span>港股股票行情权限：LV1</span><span className="footer-right">{liveConnected ? '实时行情 · 策略仍为模拟审批模式' : '请选择可用行情源或启动对应桥接'}</span></footer>
-        {showEditor && <PositionEditor onSave={savePosition} onClose={() => setShowEditor(false)} />}
+        {showEditor && <PositionEditor initial={editorInitial} onSave={savePosition} onDelete={deletePosition} onClose={() => { setShowEditor(false); setEditorInitial(null) }} />}
         {showSourceSettings && <MarketSourceSettings source={marketSource} onChange={setMarketSource} onClose={() => setShowSourceSettings(false)} />}
         {tradeDraft && <TradeTicket draft={tradeDraft} cash={account.cash} position={accountPositions.find((item) => item.symbol === tradeDraft.symbol)} quote={liveQuotes[tradeDraft.symbol]} onClose={() => setTradeDraft(null)} onApprove={(order) => executeTrade(order, order.side)} />}
         {executionNotice && <div className="execution-toast"><Check size={16} /><span>{executionNotice}</span></div>}
