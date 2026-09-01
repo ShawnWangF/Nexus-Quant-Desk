@@ -235,6 +235,10 @@ th:first-child, td:first-child { padding-left: 0; }
 .holding-plan > div:not(.holding-actions) { display: grid; gap: 4px; }
 .holding-plan span { color: #687980; font-size: 9px; }
 .holding-plan strong, .holding-plan b { color: #c8d6d3; font: 10px 'DM Mono', monospace; }
+.holding-plan > div:nth-child(1) strong { font-size: 11px; }
+.execution-qty { color: #dbe8e4 !important; font-weight: 700; }
+.expected-effect { color: #e4b66c !important; }
+.holding-plan > div:nth-child(5) b { color: #e4b66c; }
 .holding-plan i { font-style: normal; }
 .holding-actions { display: flex; align-items: center; gap: 3px; margin-left: auto; }
 .holding-actions .icon-button[aria-label^="编辑"]::after { content: '编辑'; margin-left: 4px; font: 10px 'Manrope', sans-serif; }

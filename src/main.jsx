@@ -87,13 +87,21 @@ function buildRecommendation(item, liveQuotes, isCandidate = false) {
   const volatility = item.risk === '高' ? 0.035 : 0.025
   const lossPct = item.avg ? (price - Number(item.avg)) / Number(item.avg) * 100 : 0
   const reduceRisk = !isCandidate && (item.risk === '高' || lossPct < -4)
+  const baseQty = Number(item.qty || 0)
+  const tradeQty = baseQty ? Math.max(100, Math.floor(baseQty * (reduceRisk ? .2 : .1) / 100) * 100) : 1000
+  const action = reduceRisk ? '减仓 / 控制风险' : isCandidate ? '买入 / 回踩确认' : '持有 / 回踩加仓'
+  const targetMultiplier = reduceRisk ? 1.025 : 1.10
+  const stopMultiplier = reduceRisk ? .975 : .94
   return {
     ...item,
     price,
-    action: reduceRisk ? '减仓 / 控制风险' : isCandidate ? '观察 / 回踩确认' : '持有 / 回踩加仓',
+    action,
     entry: `${(price * (isCandidate ? 0.985 : 0.99)).toFixed(2)} – ${(price * 1.003).toFixed(2)}`,
-    stop: (price * (reduceRisk ? 0.975 : 0.94)).toFixed(2),
-    target: (price * (reduceRisk ? 1.025 : 1.10)).toFixed(2),
+    stop: (price * stopMultiplier).toFixed(2),
+    target: (price * targetMultiplier).toFixed(2),
+    tradeQty,
+    execution: `${reduceRisk ? '卖出' : '买入'} ${tradeQty.toLocaleString()} 股`,
+    expected: `目标 ${((targetMultiplier - 1) * 100).toFixed(1)}% · 风险 ${((1 - stopMultiplier) * 100).toFixed(1)}%`,
     score: reduceRisk ? 'C+' : item.score || 'A-',
     method: item.method || (item.symbol === 'HK.07200' ? '趋势 + ATR 杠杆过滤' : '动量 + VWAP + 风险预算'),
   }
@@ -245,7 +253,7 @@ function RecommendationsPanel({ positions, liveQuotes, onOpenTrade }) {
   const positionSymbols = new Set(positions.map((position) => position.symbol))
   const candidates = candidateStocks.filter((item) => !positionSymbols.has(item.symbol)).map((item) => buildRecommendation(item, liveQuotes, true))
   const combined = [...recommendations, ...candidates]
-  return <section className="panel recommendation-panel"><div className="panel-header"><div><div className="panel-kicker"><Sparkles size={14} />AI 荐股与点位</div><h2>量化计划草案 <span className="live-chip">按实时价计算</span></h2></div><span className="muted">每次刷新重新计算</span></div><div className="recommendation-note"><BrainCircuit size={15} /><span>目标价不会固定写死：以富途最新价为基准，结合 ATR 风险带动态计算。点击建议会自动填入交易票据，批准前不会改变模拟账户。</span></div><div className="recommendation-table"><div className="recommendation-head"><span>标的</span><span>策略动作</span><span>触发区间</span><span>止损</span><span>目标</span><span>评分</span><span>执行</span></div>{combined.map((item) => <div className="recommendation-row" key={item.symbol}><div><strong>{item.symbol}</strong><small>{item.name} · {formatNumber(item.price)}</small></div><div><strong className={item.action.startsWith('减') ? 'negative' : 'positive'}>{item.action}</strong><small>{item.method}</small></div><span>{item.entry}</span><span className="negative">{item.stop}</span><span className="positive">{item.target}</span><b className={item.score === 'C+' ? 'warning-text' : 'positive'}>{item.score}</b><button className="small-action" onClick={() => onOpenTrade(item, item.action.startsWith('减') ? 'sell' : 'buy')}><ShoppingCart size={12} />填入交易票据</button></div>)}</div></section>
+  return <section className="panel recommendation-panel"><div className="panel-header"><div><div className="panel-kicker"><Sparkles size={14} />AI 荐股与点位</div><h2>可执行量化指令 <span className="live-chip">按实时价计算</span></h2></div><span className="muted">触发后才执行 · 人工审批</span></div><div className="recommendation-note"><BrainCircuit size={15} /><span>区间内触发具体动作；数量按持仓规模与风险预算计算。预计效果是止盈/止损相对当前价的收益风险比，不代表保证收益。</span></div><div className="recommendation-table"><div className="recommendation-head"><span>标的</span><span>触发后动作</span><span>建议区间</span><span>执行数量</span><span>止损 / 目标</span><span>预期效果</span><span>执行</span></div>{combined.map((item) => <div className="recommendation-row" key={item.symbol}><div><strong>{item.symbol}</strong><small>{item.name} · 现价 {formatNumber(item.price)}</small></div><div><strong className={item.action.startsWith('减') ? 'negative' : 'positive'}>{item.action}</strong><small>{item.method}</small></div><span>{item.entry}</span><span className="execution-qty">{item.execution}</span><span><i className="negative">{item.stop}</i> / <i className="positive">{item.target}</i></span><span className="expected-effect">{item.expected}</span><button className="small-action" onClick={() => onOpenTrade({ ...item, qty: item.tradeQty }, item.action.startsWith('减') ? 'sell' : 'buy')}><ShoppingCart size={12} />填入交易票据</button></div>)}</div></section>
 }
 
 function MarketStatusPanel({ watchlist, selectedSymbol, liveQuotes, onSelect, onAdd, onRemove }) {
@@ -268,7 +276,7 @@ function MarketStatusPanel({ watchlist, selectedSymbol, liveQuotes, onSelect, on
 }
 
 function HoldingsStrategyPanel({ positions, liveQuotes, onEdit, onDelete, onTrade }) {
-  return <section className="panel holdings-strategy-panel"><div className="panel-header"><div><div className="panel-kicker"><WalletCards size={14} />当前模拟持仓</div><h2>持仓明细与逐标的策略</h2></div><span className="muted">可编辑 · 可删除 · 模拟账户</span></div>{positions.length ? <div className="holding-strategy-list">{positions.map((position) => { const live = hydratePosition(position, liveQuotes); const plan = buildRecommendation(position, liveQuotes); return <article className="holding-strategy-row" key={position.symbol}><div className="holding-identity"><div><strong>{position.name}</strong><small>{position.symbol} · {position.side}仓 · {formatNumber(position.qty, 0)} 股</small></div><b className={live.tone}>{live.pnl >= 0 ? '+' : ''}{formatNumber(live.pnl)}<small>{live.pnlPct >= 0 ? '+' : ''}{live.pnlPct.toFixed(2)}%</small></b></div><div className="holding-metrics"><span>现价 <b>{formatNumber(live.last, live.last < 10 ? 3 : 2)}</b></span><span>成本 <b>{formatNumber(position.avg)}</b></span><span>风险 <b className={position.risk === '高' ? 'negative' : position.risk === '中' ? 'warning-text' : 'positive'}>{position.risk}</b></span></div><div className="holding-plan"><div><span>策略建议</span><strong className={plan.action.startsWith('减') ? 'negative' : 'positive'}>{plan.action}</strong></div><div><span>建议区间</span><b>{plan.entry}</b></div><div><span>止损 / 目标</span><b><i className="negative">{plan.stop}</i> / <i className="positive">{plan.target}</i></b></div><div className="holding-actions"><button className="small-action" onClick={() => onTrade(position, plan.action.startsWith('减') ? 'sell' : 'buy')}><ShoppingCart size={12} />填入交易</button><button className="icon-button" onClick={() => onEdit(position)} aria-label={`编辑 ${position.symbol}`} title="编辑持仓"><Pencil size={14} /></button><button className="icon-button danger-icon" onClick={() => onDelete(position.symbol)} aria-label={`删除 ${position.symbol}`} title="删除持仓"><Trash2 size={14} /></button></div></div></article> })}</div> : <div className="empty-state holdings-empty"><WalletCards size={25} /><strong>暂无模拟持仓</strong><span>点击右上角“配置持仓”添加你的真实持仓。</span></div>}</section>
+  return <section className="panel holdings-strategy-panel"><div className="panel-header"><div><div className="panel-kicker"><WalletCards size={14} />当前模拟持仓</div><h2>持仓明细与逐标的策略</h2></div><span className="muted">策略指令 · 数量 · 目标</span></div>{positions.length ? <div className="holding-strategy-list">{positions.map((position) => { const live = hydratePosition(position, liveQuotes); const plan = buildRecommendation(position, liveQuotes); return <article className="holding-strategy-row" key={position.symbol}><div className="holding-identity"><div><strong>{position.name}</strong><small>{position.symbol} · {position.side}仓 · {formatNumber(position.qty, 0)} 股</small></div><b className={live.tone}>{live.pnl >= 0 ? '+' : ''}{formatNumber(live.pnl)}<small>{live.pnlPct >= 0 ? '+' : ''}{live.pnlPct.toFixed(2)}%</small></b></div><div className="holding-metrics"><span>现价 <b>{formatNumber(live.last, live.last < 10 ? 3 : 2)}</b></span><span>成本 <b>{formatNumber(position.avg)}</b></span><span>风险 <b className={position.risk === '高' ? 'negative' : position.risk === '中' ? 'warning-text' : 'positive'}>{position.risk}</b></span></div><div className="holding-plan"><div><span>触发后动作</span><strong className={plan.action.startsWith('减') ? 'negative' : 'positive'}>{plan.action}</strong></div><div><span>建议区间</span><b>{plan.entry}</b></div><div><span>执行数量</span><b>{plan.execution}</b></div><div><span>止损 / 目标</span><b><i className="negative">{plan.stop}</i> / <i className="positive">{plan.target}</i></b></div><div><span>预期效果</span><b>{plan.expected}</b></div><div className="holding-actions"><button className="small-action" onClick={() => onTrade({ ...position, qty: plan.tradeQty }, plan.action.startsWith('减') ? 'sell' : 'buy')}><ShoppingCart size={12} />填入交易</button><button className="icon-button" onClick={() => onEdit(position)} aria-label={`编辑 ${position.symbol}`} title="编辑持仓"><Pencil size={14} /></button><button className="icon-button danger-icon" onClick={() => onDelete(position.symbol)} aria-label={`删除 ${position.symbol}`} title="删除持仓"><Trash2 size={14} /></button></div></div></article> })}</div> : <div className="empty-state holdings-empty"><WalletCards size={25} /><strong>暂无模拟持仓</strong><span>点击右上角“配置持仓”添加你的真实持仓。</span></div>}</section>
 }
 
 function App() {
@@ -294,7 +302,10 @@ function App() {
   const [account, setAccount] = useState(() => {
     try { return JSON.parse(window.localStorage.getItem(STORAGE_KEY)) || { cash: INITIAL_CASH, positions: [], trades: [] } } catch { return { cash: INITIAL_CASH, positions: [], trades: [] } }
   })
-  const selectedSignal = useMemo(() => signals.find((item) => item.symbol === watchSymbol) || signals[0], [signals, watchSymbol])
+  const selectedSignal = useMemo(() => {
+    const base = signals.find((item) => item.symbol === watchSymbol) || signals[0] || { symbol: watchSymbol, name: watchSymbol, price: 0 }
+    return { ...base, ...(liveQuotes[watchSymbol] || {}) }
+  }, [signals, watchSymbol, liveQuotes])
   const accountPositions = account.positions
 
   useEffect(() => { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(account)) }, [account])
